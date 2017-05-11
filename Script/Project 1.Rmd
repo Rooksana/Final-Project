@@ -1,0 +1,491 @@
+---
+title: "Project1"
+author: "Rooksana Sultana"
+date: "April 30, 2017"
+output: html_document
+---
+
+```{r }
+require(RCurl)
+binData <- getBinaryURL("https://archive.ics.uci.edu/ml/machine-learning-databases/00296/dataset_diabetes.zip", ssl.verifypeer=FALSE)
+head(binData)
+conObj <- file("dataset_diabetes.zip", open = "wb") # writing binary file
+writeBin(binData, conObj) #transfer binary data 
+close(conObj) # close connection
+files <- unzip("dataset_diabetes.zip") 
+diabetes <- read.csv(files[1], stringsAsFactors = FALSE) # file[1] = diabetic_data.csv
+```
+# Structure of data 
+```{r}
+str(diabetes)
+#names(diabetes)
+#head(diabetes)
+dim(diabetes)
+summary(diabetes)
+```
+# What are we examining? Business Question
+
+The dataset represents 10 years (1999-2008) of clinical care at 130 US  hospitals and integrated delivery networks. It includes101,766 instances and 55 features representing patient and hospital outcomes.Some of the attributes are Race, age,Admissiontype,time in hospital,num lab procedures,num procedures,num medications,number outpatient, number emergency, number inpatient,discharge disposition id,admission source id, number diagnoses, max glu serum, A1Cresult,metformin.Hospital readmission for diabetic patients is a major concern in the United States and reflects the inadequacies in health care system.Effective prediction on readmissions enables hospitals to target patients at the highest risk and provide better care.
+
+
+# Goal
+Identify the major factors that contribute to hospital readmissions rate for diabetes.
+
+# Imbalanced data
+This data set contains only 11% of cases of readmission within 30 days and 89% of cases with readmission after 30 days or No readmission. This is a severely imbalanced data set.
+
+Sampling method Used:
+1.Under Sampling-reduces the number of observations from the majority class to balance the data.
+2.Over Sampling-replicates the number of observations from the minority class to balance the data.
+3.Both and
+4.Synthetic Balancing method-generates artificial data to balance the data.
+
+# Models created: Model are built on training set and validated on test set
+1.Decision Trees using rpart:
+2.Decision Tree using Under sampling, Over sampling  and 
+3.Decision Tree using both (under and over sampling) 
+4.Decision Trees using Synthetic Balancing method.
+5.Random Forest
+6.Stepwise Regression(Peer recommended)
+
+
+# Metrics used to predict Model Performance
+1.Accuracy- which shows how accurate a model is in identifying patients who were readmmited to the hospital within 30 days and who were not.
+2.Sensitivity- which shows how Accurate (True Positive values) a model is in identifying patients who were readmitted within 30days.
+3.Specificity- which shows how Accurate (False Positive values) a model is in identifying patients who were not readmmited to hospital with in 30 days
+
+# Data Pre-processing
+
+Data cleansing:- 
+Removing variables with high missing values- Weight has missing 97% of observations and payer code for 47% of observations.Removed non useful columns. Drugs such as Examide and Citoglipton were not given even to a single patient hence removed. 
+
+```{r}
+diabetes1 <- subset(diabetes,select=-c(encounter_id, patient_nbr, examide,citoglipton,weight, payer_code, medical_specialty)) 
+diabetes2 <- diabetes1[diabetes1$race != "?",] # No. of observations drops by 2273
+diabetes2 <- diabetes2[diabetes2$diag_1 != "?",] # No of observations drops by 21
+diabetes2 <- diabetes2[diabetes2$diag_2 != "?",] # No of observations drops by 358
+diabetes2 <- diabetes2[diabetes2$diag_3 != "?",] # No of observations drops by 1453
+names(diabetes2)
+```
+#binary representation of readmitted within 30 days
+"0" represnts No readmisson or readmission after 30 days whereas 1 represents readmission within 30 days.
+```{r}
+diabetes2$readmittedbin <- ifelse(diabetes2$readmitted == "<30",1,0)
+#names(diabetes2)
+#str(diabetes2)
+```
+#To make factor of levels
+```{r}
+diabetes3 <- cbind(diabetes2[c(7:13,17)], lapply(diabetes2[c(1:6,14:16,18:44)],factor))
+head(diabetes3)
+dim(diabetes3)
+```
+#table to get frequency of different levels of readmission
+```{r}
+table(diabetes3$readmitted)
+prop.table(table(diabetes3$readmitted))
+
+table(diabetes3$readmittedbin)
+prop.table(table(diabetes3$readmittedbin))
+
+racewise <- table(diabetes3$readmittedbin,diabetes3$race)
+print(racewise)
+
+library(ggplot2)
+race_diag_plot = ggplot(diabetes3, aes(x = race, y = number_diagnoses, fill = race))
+race_diag_plot + geom_boxplot() + theme() + 
+  ggtitle("Number of Diabetes Diagnoses by Race") +
+  xlab("Race")+
+  ylab("Number of Diagnoses")
+
+
+ggplot(diabetes3, aes(x = race, fill = race))+geom_bar() + ggtitle("Graph of # of Patients Per Rrace")  + xlab("Race") + ylab("# of Patients") + stat_count(aes(label = ..count.. + 1000), geom = "text", position = "identity")
+
+genderwise <-table(diabetes3$readmittedbin,diabetes3$gender)
+genderwise
+
+agewise <- table(diabetes3$readmittedbin,diabetes3$age)
+agewise
+plot(agewise,col ="lightblue", xlab = " Age ", main= " Frequency of Readmission", lwd =20)
+# highest no of patient readmitted to the hospital with in 30 days were in (70-80yrs) age range.
+
+dis<-table(diabetes3$readmitted ,diabetes3$admission_type_id)
+hist(dis)
+
+
+timinhoswise <-table(diabetes3$readmittedbin,diabetes3$time_in_hos)
+timinhoswise
+
+A1Cresult<-table(diabetes3$readmitted,diabetes3$A1Cresult)
+A1Cresult
+
+dih<-table(diabetes3$readmitted,diabetes3$number_emergency)
+dih
+
+
+dis<-table(diabetes3$readmitted,diabetes3$discharge_disposition_id)
+dis
+# maximum number of patients who got readmitted within 30 days(1) were discharged to home.
+# out of 396 patients who were dischared to hospice only 55 patients were readmitted to hospital & 341 patients did not get readmitted.
+
+
+diag<-table(diabetes3$readmitted,diabetes3$diag_1)
+# 30% of the patients in the dataset were diagnosed with cardiac diseases. maximum number of patients who were readmitted within 30 days were diagnosed with other circulatory problems.
+```
+
+Analysis for Independent variable "Race".
+```{r}
+clean = diabetes[c(1:7, 9, 16, 22, 24, 49)] #Choosing columns we want to experiement with
+summary(clean)
+
+race_diag_plot = ggplot(clean, aes(x = race, y = number_diagnoses, fill = race))
+race_diag_plot + geom_boxplot() + theme() + 
+  ggtitle("Number of Diabetes Diagnoses by Race") +
+  xlab("Race")+
+  ylab("Number of Diagnoses")
+
+#Subsetting the "?" and the "Caucasian" races to perform the T-test
+clean_other = clean[clean$race == "?",]
+summary(clean_other)
+clean_cauc = clean[clean$race == "Caucasian",]
+t.test(clean_other$number_diagnoses, clean_cauc$number_diagnoses)
+
+#Inference : Caucasians tend to recieve more diagnoses than the average population.
+library(ggplot2)
+
+ggplot(clean, aes(x =race  , fill = race ))+geom_bar() + ggtitle("Graph of # of Patients Per Rrace") +
+  xlab("race") + ylab("# of Patients") + stat_count(aes(label =..count.. + 1000), geom = "text", position = "identity")
+```
+
+```{r}
+Number_patients <- table(diabetes3$readmitted)
+names(Number_patients)
+View(Number_patients) # <30=11066  >30=34649   No=52338
+plot(Number_patients,col ="lightblue", xlab = " Readmission Days ", main= " Frequency of Readmission", lwd =20,pch=18)
+```
+
+```{r}
+Number_patients_bin <- table(diabetes3$readmittedbin)
+View(Number_patients_bin)#0=86967   1=11066
+plot(Number_patients_bin,col ="lightblue", xlab = " Readmission Days_bin ", main= " Frequency of Readmission", lwd =20,pch=18)
+```
+# Splitting data in Traing and Test data set(80:20 split)
+We are using a sample training data as our original sample has 100,000 observations. This large data takes a long time to finish and we face issues with Rmarkdown. Hence we are using a smaller training data (20,000 observations)
+```{r}
+library(caret)
+set.seed(123)
+inTrain <- createDataPartition(diabetes3$readmittedbin, p=.2, list=FALSE)
+objTrain <-diabetes3[inTrain,]
+objTest <- diabetes3[-inTrain,]
+dim(objTrain)
+table(objTrain$readmittedbin)
+prop.table(table(objTrain$readmittedbin))
+
+table(objTest$readmittedbin)
+prop.table(table(objTest$readmittedbin))
+```
+
+As we see, this data set contains only 11% of cases of readmission within 30 days and 89% of cases with readmission after 30 days or No readmission. This is a severely imbalanced data set.
+
+Let us see how badly can this affect our prediction accuracy ? Let's build a model on this data. I'll be using decision tree algorithm for modeling purpose. #Prediction with three levels of response variable.
+
+# Decision Tree with Imbalanced dataset.
+```{r}
+library(rpart)
+cfit <- rpart(readmitted ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = objTrain, method="class", minsplit = 20, minbucket = 5, cp = 0.001)
+# minsplit = the minimum number of observations that must exist in a node in order for a split to be attempted.
+# minbucket=the minimum number of observations in any terminal <leaf> node. If only one of minbucket or minsplit is specified, the code either sets minsplit to minbucket*3 or minbucket to minsplit/3, as appropriate.
+# http://stackoverflow.com/questions/29620619/understanding-of-minbucket-function-in-cart-model-using-r
+
+head(predict(cfit))
+
+par(mar=c(1,1,0.25,1))
+plot(cfit, branch = 0.4,uniform = TRUE, compress = TRUE)
+text(cfit, pretty = 0)
+
+rpart.predict <- predict(cfit, newdata = objTrain, type="class")
+tail(rpart.predict)
+
+cf <-confusionMatrix(rpart.predict, objTrain$readmitted)
+cf
+#Accuracy = 58.43%
+
+
+
+mean.error.rate.rpart <- 1- cf$overall[1]
+mean.error.rate.rpart # Accuracy= 41.56%
+
+#Validation of decision tree using the 'Complexity Parameter'
+
+par(mar=c(3,3,3,3))
+plotcp(cfit,lty = 3, col = 1)# Plotcp() provides a graphical representation to the cross validated error summary. 
+
+printcp(cfit)# used to compute error rate on the sample used to fit the model.The value of cp should be least, so that the cross-validated error rate is minimum.
+
+cfit$cptable[which.min(cfit$cptable[,"xerror"]),"CP"]# cp=0.001 #http://statmethods.net/advstats/cart.html
+# Pruning and replotting the tree:
+
+```
+# Cross-validation of the tree
+```{r}
+library(tree)
+cfit.tree <- tree(readmitted ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = objTrain, method="class")
+
+cv.cfit.tree <- cv.tree(cfit.tree, FUN = prune.misclass) 
+cv.cfit.tree
+plot.tree.sequence(cv.cfit.tree)
+
+prune.cfit.tree <- prune.misclass(cfit.tree, best = 2) # set size corresponding to the lowest value in the below plot.
+summary(prune.cfit.tree)
+
+plot(prune.cfit.tree)
+text(prune.cfit.tree, pretty = 0)
+```
+#After pruning
+```{r}
+cfit2 = prune(cfit, cp = 0.001)
+
+par(mar=c(1,1,0.25,1))
+plot(cfit2, branch = 0.4,uniform = TRUE, compress = TRUE)
+#text(cfit2)
+```
+#Using the pruned tree to predict and pulling up the mean error rate and confusion matrix
+#Prediction on test set
+```{r}
+rpart.prune.predict <- predict(cfit2, newdata = objTest,type = "class")
+
+cf.prune <-confusionMatrix(rpart.prune.predict,objTest$readmitted)
+cf
+#Mean error rate
+mean.error.rate.rpart.prune <- 1- cf.prune$overall[1]
+mean.error.rate.rpart.prune#Accuracy=42.72%
+
+
+cf.prune$table
+```
+#Decision Tree with two class response variable
+```{r}
+cfit_bin <- rpart(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = objTrain, method="class", minsplit = 1, minbucket = 1, cp = 0.001)
+
+par(mar=c(2,2,0.25,1))
+plot(cfit_bin, branch = 0.4,uniform = TRUE, compress = TRUE)
+text(cfit_bin, pretty = 0)
+
+#How to read plotcp - http://www.wekaleamstudios.co.uk/posts/classification-trees-using-the-rpart-function/#m3mLNpeke0I
+rpart.predict_bin <- predict(cfit_bin, newdata = objTrain,type="prob")
+
+View(objTrain)
+head(rpart.predict_bin)
+
+View(rpart.predict_bin)
+
+#https://www.rdocumentation.org/packages/ROSE/versions/0.0-3/topics/accuracy.meas
+```
+# ROC Curve
+The closer the curve follows the left hand border and then the top left border of the ROC space, the more accurate the test. Displays the true positive rate (sensitivity) against the false positive rate (1-specificity). 
+```{r}
+library(pROC)
+library(ROSE)
+roc.curve(objTrain$readmittedbin, rpart.predict_bin[,2], plotit = T)
+roc.curve(objTrain$readmittedbin, rpart.predict_bin[,2], plotit = T)
+## Area under the curve (AUC): 0.585 #https://en.wikipedia.org/wiki/Receiver_operating_characteristic#Area_under_the_curve
+par =TRUE
+
+#AUC = 0.58 is a terribly low score. Therefore, it is necessary to balanced data before applying any models . I have used the sampling techniques and try to improve this prediction accuracy.
+```
+
+#After pruning
+```{r}
+cfit2_bin = prune(cfit_bin, cp = 0.0001)
+
+par(mar=c(.5,.5,.5,.5))
+plot(cfit2_bin, branch = 0.4,uniform = TRUE, compress = TRUE)
+text(cfit2_bin, pretty=0)
+
+```
+#Prediction on training  set
+```{r}
+rpart.prune.predict2_bin <- predict(cfit2_bin, newdata = objTrain,type = "class")
+
+cf.prune_bin <-confusionMatrix(rpart.prune.predict2_bin,objTrain$readmittedbin)
+cf.prune_bin
+ #Accuracy   = 89.06%
+ #Sensitivity= 99.85%
+ #Specifcity = 4.29%
+
+
+#Mean error rate
+mean.error.rate.rpart.prune2 <- 1- cf.prune_bin$overall[1]
+mean.error.rate.rpart.prune
+#Accuracy=42.72%
+```
+#over sampling
+```{r}
+table(objTrain$readmittedbin)
+
+data_balanced_over <- ovun.sample(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin,  data = objTrain, method = "over", N = 34794)$data
+
+table(data_balanced_over$readmittedbin) #Number of Observations with No Readmission and Readmission after 30 days= 17398 and Number of Observations with readmission within 30 days=17396
+```
+#under sampling
+```{r}
+data_balanced_under <- ovun.sample(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin,  data = objTrain, method = "under", N = 4428, seed=1)$data
+
+table(data_balanced_under$readmittedbin)
+```
+#Balanced sampling
+Let us do both undersampling and oversampling on this imbalanced data. This can be achieved using method = "both". In this case, the minority class is oversampled with replacement and majority class is undersampled without replacement.
+```{r}
+set.seed(123)
+data_balanced_both <- ovun.sample(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = objTrain, method = "both", N = 19610, seed=1)$data
+
+table(data_balanced_both$readmittedbin)
+```
+#ROSE SYTHETIC DATA BALANCING
+ROSE helps us to generate data synthetically. This data is considered to provide better estimate of original data.
+```{r}
+set.seed(123)
+data.rose <- ROSE(readmittedbin ~ time_in_hospital +num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = objTrain,seed=1)$data
+
+table(data.rose$readmittedbin)
+```
+#building a decision tree models-Rose
+```{r}
+library(pROC)
+library(gplots)
+library(ggplot2)
+cfit.rose <- rpart(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = data.rose)
+
+#head(data.rose)
+
+rpart.predict.rose <- predict(cfit.rose, newdata = data.rose)
+par(2,2,2,2)
+
+par(new=TRUE)
+#roc.curve(data.rose$readmittedbin, rpart.predict.rose[,2], col = redblue(1000), add =TRUE) #0.690
+
+
+#Prediction on rose set
+rpart.prune.predict3_bin <- predict(cfit.rose, newdata = data.rose,type = "class")
+
+cf.prune_bin <-confusionMatrix(rpart.prune.predict3_bin,objTrain$readmittedbin)
+cf.prune_bin
+#Accuracy   = 58.27%
+#Sensitivity= 60.86%
+#Specificity= 37.94%
+
+
+#Mean error rate
+mean.error.rate.rpart.prune2 <- 1- cf.prune_bin$overall[1]
+mean.error.rate.rpart.prune2 # Accuracy=41.72%
+
+```
+#Decision tree models-over sampling
+```{r}
+cfit.over <- rpart(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin,  data = data_balanced_over)
+
+rpart.predict.over <- predict(cfit.over, newdata = data_balanced_over)
+
+```
+
+#Decision tree model-undersampling
+```{r}
+library(ggplot2)
+library(ROSE)
+cfit.under <- rpart(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin,   data = data_balanced_under)
+
+rpart.predict.under <- predict(cfit.over, newdata = data_balanced_under)
+par(new=TRUE)
+
+#roc.curve(data_balanced_under$readmittedbin, rpart.predict.under[,2], add =TRUE, col = bluered(2))# AUC=0.634
+
+```
+#Decision tree model-both under and over sampling
+```{r}
+library(gplots)
+library(ggplot2)
+
+cfit.both <- rpart(readmittedbin ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin,  data = data_balanced_both)
+
+rpart.predict.both <- predict(cfit.both, newdata = data_balanced_both)
+#roc.curve(data_balanced_both$readmittedbin, rpart.predict.both[,2],add =TRUE, col = redblue(5)) # Auc=0.634
+```
+# ROC curve comparison
+```{r}
+library(png)
+library(gridExtra)
+library(grid)
+img1 <-  rasterGrob(as.raster(readPNG("C:/Users/rooksana/Desktop/Project/Rplot.png")), interpolate = FALSE)
+#img1
+grid.arrange(img1,ncol = 1)
+```
+# Randomforest
+```{r}
+#RandomForest on three class response variable(readmitted after 30 days, Readmitted within 30 days and No readmission)
+
+library(randomForest)
+set.seed(123)
+rf.diabetes <- randomForest(readmitted ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_emergency + number_inpatient + race + age + admission_type_id + discharge_disposition_id + admission_source_id + number_diagnoses + max_glu_serum + A1Cresult + metformin + insulin, data = objTrain,importance=TRUE)
+
+rf.diabetes #OBB Error rate=43.37% Out-of-bag (OOB) error, also called out-of-bag estimate, is a method of measuring the prediction error of random forests
+rf.predict <- predict(rf.diabetes,newdata =objTest)
+
+varImpPlot(rf.diabetes,main = "Important Variables")
+importance(rf.diabetes)
+
+# Confusion Matrix and the mean error rate:
+
+rf.cm <- confusionMatrix(rf.predict,objTest$readmitted)
+rf.cm
+rf.cm$table
+
+# Accuracy= 57.16%
+#sensitivity <30- 2%, >30- 37% and no-81%
+#specificity <30-99%, >30- 78% and no-38%
+
+
+
+mean.error.rate.rf <- (1- rf.cm$overall[1])
+# This gives error rate
+mean.error.rate.rf # Accuracy= 42.83%
+```
+# Revisions made, based on the Peer feedback:
+
+
+#Stepwise Regression
+It identifies the important independent variables.
+```{r}
+glm_rd <- glm(readmittedbin ~.,data = data.rose, family = "binomial")
+step.dia <- step(glm_rd)
+summary(step.dia)
+# Variables which are most significant in identifying patients who were readmitted to hospital within 30 days are number_emergency, number_inpatient, admission                                                 type_id5, discharge_dispositionid2, admission_sourceid4, A1CresultNone and insulinNo. 
+step.dia$anova
+```
+# Conclusion
+#######1.The results obtained by random forest and decision tree on the actual imbalanced data set are similar. 
+#######2.I used synthetic data balancing techniques and improved model accuracy.
+
+# Preferred Model
+Decision tree using Synthetic balanced method, as it has high accuracy(46%) and Sensitivity (44%) and it is better in predicting readmission rates within 30 days when compared to other model.
+
+# Recommendations
+#######1.The readmission groups are related to number of inpatient visits, discharge disposition, admission source and admission type.
+#######2.Instead of tracking all 55 attributes, hospitals are suggested to focus on number of patient's  inpatient visits, admission source, admission type, discharge disposition.
+#######3.Focus on admission source of the patients that is, who had emergency encounters and who came in from Physicians referral, Clinic referral, transferred from another hospital.
+#######4.Hospitals are advised to focus not only inpatient treatment but also continue care after discharge. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
